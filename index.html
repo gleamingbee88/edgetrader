@@ -688,10 +688,23 @@ async function refreshWatchlist() {
     return;
   }
   document.getElementById('wl-last').textContent = 'Refreshing...';
-  const results = await Promise.all(watchlist.map(t => fetchStockData(t)));
-  results.forEach(r => { wlData[r.ticker] = r; });
-  renderWatchlist();
-  checkAlerts();
+
+  // Free tier = 5 calls/min. Fetch sequentially with 13s gap to stay safe
+  // Show partial results as they load
+  for (let i = 0; i < watchlist.length; i++) {
+    const t = watchlist[i];
+    document.getElementById('wl-last').textContent = `Loading ${i+1}/${watchlist.length}...`;
+    const result = await fetchStockData(t);
+    wlData[t] = result;
+    renderWatchlist();
+    checkAlerts();
+    // Wait 13 seconds between calls to respect 5/min rate limit
+    // Skip delay after last ticker
+    if (i < watchlist.length - 1) {
+      await new Promise(r => setTimeout(r, 13000));
+    }
+  }
+
   const now = new Date();
   document.getElementById('wl-last').textContent = `Updated ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 }
@@ -795,9 +808,16 @@ async function runScreener() {
   const btn = document.getElementById('sc-btn');
   btn.textContent = 'Scanning...'; btn.disabled = true;
   document.getElementById('sc-status').innerHTML = `<span class="spin">⟳</span> Scanning ${tickers.length} tickers...`;
-  document.getElementById('sc-tbody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3);font-size:11px"><span class="spin">⟳</span> Fetching data...</td></tr>`;
+  document.getElementById('sc-tbody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3);font-size:11px"><span class="spin">⟳</span> Fetching data (${tickers.length} tickers · ~${tickers.length*13}s on free tier)...</td></tr>`;
 
-  const results = await Promise.all(tickers.map(t => fetchStockData(t)));
+  // Sequential fetching to respect 5 calls/min rate limit
+  const results = [];
+  for (let i = 0; i < tickers.length; i++) {
+    document.getElementById('sc-status').innerHTML = `<span class="spin">⟳</span> Loading ${tickers[i]} (${i+1}/${tickers.length})...`;
+    const r = await fetchStockData(tickers[i]);
+    results.push(r);
+    if (i < tickers.length - 1) await new Promise(res => setTimeout(res, 13000));
+  }
   results.sort((a,b) => (b.score||0) - (a.score||0));
 
   const valid = results.filter(r => r.ok);
