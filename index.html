@@ -574,9 +574,31 @@ function saveApiKey() {
   if (!k) { alert('Please paste your Polygon API key first'); return; }
   POLY_KEY = k;
   localStorage.setItem('poly-key', k);
-  document.getElementById('key-status').textContent = 'Key saved ✓ — loading prices...';
+  document.getElementById('key-status').textContent = 'Key saved ✓ — testing connection...';
   document.getElementById('key-status').style.color = 'var(--green)';
-  refreshWatchlist();
+  testConnection();
+}
+
+async function testConnection() {
+  const status = document.getElementById('key-status');
+  try {
+    const to = new Date().toISOString().split('T')[0];
+    const from = new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0];
+    const data = await polyFetch(`/v2/aggs/ticker/AAPL/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=5`);
+    if (data.results && data.results.length > 0) {
+      status.textContent = `✓ Connected! AAPL = $${data.results[data.results.length-1].c.toFixed(2)}`;
+      status.style.color = 'var(--green)';
+      // Wait 15s before loading full watchlist to reset rate limit
+      setTimeout(() => refreshWatchlist(), 15000);
+      status.textContent += ' — watchlist loads in 15s...';
+    } else {
+      status.textContent = 'Connected but no data returned';
+      status.style.color = 'var(--amber)';
+    }
+  } catch(e) {
+    status.textContent = `Connection failed: ${e.message}`;
+    status.style.color = 'var(--red)';
+  }
 }
 
 function initKeyUI() {
@@ -617,27 +639,21 @@ function calcEma(arr, p) {
   return e;
 }
 
-async function fetchStockData(ticker) {
+async function fetchStockData(ticker, retries = 2) {
   try {
     const to = new Date().toISOString().split('T')[0];
     const from = new Date(Date.now() - 370*24*60*60*1000).toISOString().split('T')[0];
-
-    // Get daily aggs — works on free tier
     const aggs = await polyFetch(`/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=365`);
     const results = aggs.results || [];
     if (results.length < 20) throw new Error('insufficient data');
-
     const closes  = results.map(r => r.c);
     const volumes = results.map(r => r.v);
     const highs   = results.map(r => r.h);
     const lows    = results.map(r => r.l);
-
-    // Latest price from last bar
     const price     = closes[closes.length - 1];
     const prevClose = closes[closes.length - 2];
     const changePct = prevClose ? (price - prevClose) / prevClose * 100 : 0;
     const todayVol  = volumes[volumes.length - 1];
-
     const ema20 = calcEma(closes, 20);
     const ema50 = calcEma(closes, 50);
     const avgVol    = volumes.slice(-21, -1).reduce((a,b) => a+b, 0) / 20;
@@ -645,15 +661,18 @@ async function fetchStockData(ticker) {
     const high52    = Math.max(...highs);
     const low52     = Math.min(...lows);
     const rangePos  = high52 > low52 ? (price - low52) / (high52 - low52) : 0;
-
     const emaPullback  = Math.abs(price - ema20) / ema20 < 0.02 && ema20 > ema50;
     const highRS       = rangePos > 0.60;
     const volSurge     = volRatio > 1.5;
     const nearSupport  = price > ema50 && price < ema50 * 1.03;
     const score = [emaPullback, highRS, volSurge, nearSupport].filter(Boolean).length;
-
     return { ticker, price, changePct, volRatio, rangePos, ema20, ema50, emaPullback, highRS, volSurge, nearSupport, score, ok: true };
   } catch(e) {
+    // Retry on rate limit after 60 seconds
+    if (e.message === 'rate_limit' && retries > 0) {
+      await new Promise(r => setTimeout(r, 60000));
+      return fetchStockData(ticker, retries - 1);
+    }
     return { ticker, ok: false, error: e.message };
   }
 }
@@ -701,7 +720,7 @@ async function refreshWatchlist() {
     // Wait 13 seconds between calls to respect 5/min rate limit
     // Skip delay after last ticker
     if (i < watchlist.length - 1) {
-      await new Promise(r => setTimeout(r, 13000));
+      await new Promise(r => setTimeout(r, 15000));
     }
   }
 
