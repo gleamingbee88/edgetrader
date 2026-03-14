@@ -571,10 +571,10 @@ function switchTool(name, btn) {
 // ── API Key ──
 function saveApiKey() {
   const k = document.getElementById('api-key-input').value.trim();
-  if (!k) return;
+  if (!k) { alert('Please paste your Polygon API key first'); return; }
   POLY_KEY = k;
   localStorage.setItem('poly-key', k);
-  document.getElementById('key-status').textContent = 'Key saved ✓';
+  document.getElementById('key-status').textContent = 'Key saved ✓ — loading prices...';
   document.getElementById('key-status').style.color = 'var(--green)';
   refreshWatchlist();
 }
@@ -980,10 +980,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ── Init ──
-POLY_KEY = POLY_KEY || 'YOUR_POLYGON_KEY_HERE';
-if (!localStorage.getItem('poly-key') && POLY_KEY !== 'YOUR_POLYGON_KEY_HERE') {
-  localStorage.setItem('poly-key', POLY_KEY);
-}
+POLY_KEY = localStorage.getItem('poly-key') || '';
 initKeyUI();
 calcSizer();
 renderJournal();
